@@ -1,0 +1,129 @@
+package ibc
+
+import (
+	"fmt"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+)
+
+// LockedAsset represents a locked asset on the Cosmos chain
+type LockedAsset struct {
+	Owner    sdk.AccAddress `json:"owner"`
+	Amount   sdk.Coin       `json:"amount"`
+	EvmChain string         `json:"evm_chain"`
+	Price    sdk.Dec        `json:"price"`
+}
+
+// MsgLockAsset defines the LockAsset message
+type MsgLockAsset struct {
+	Sender sdk.AccAddress `json:"sender"`
+	Amount sdk.Coin       `json:"amount"`
+	EvmChain string      `json:"evm_chain"`
+	Price  sdk.Dec        `json:"price"`
+}
+
+// MsgUnlockAsset defines the UnlockAsset message
+type MsgUnlockAsset struct {
+	Owner    sdk.AccAddress `json:"owner"`
+	Amount   sdk.Coin       `json:"amount"`
+	EvmChain string         `json:"evm_chain"`
+}
+
+// MsgUpdatePrice defines the UpdatePrice message
+type MsgUpdatePrice struct {
+	Owner    sdk.AccAddress `json:"owner"`
+	EvmChain string         `json:"evm_chain"`
+	Price    sdk.Dec        `json:"price"`
+}
+
+// HandleMsgLockAsset handles the LockAsset message
+func HandleMsgLockAsset(ctx sdk.Context, k Keeper, msg MsgLockAsset) sdk.Result {
+	// Deduct the asset from the sender's account
+	err := k.bankKeeper.SendCoins(ctx, msg.Sender, sdk.AccAddress{}, sdk.Coins{msg.Amount})
+	if err != nil {
+		return err.Result()
+	}
+
+	// Store the locked asset information
+	lockedAsset := LockedAsset{
+		Owner:    msg.Sender,
+		Amount:   msg.Amount,
+		EvmChain: msg.EvmChain,
+		Price:    msg.Price,
+	}
+	k.SetLockedAsset(ctx, lockedAsset)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgUnlockAsset handles the UnlockAsset message
+func HandleMsgUnlockAsset(ctx sdk.Context, k Keeper, msg MsgUnlockAsset) sdk.Result {
+	// Retrieve the locked asset information
+	lockedAsset, found := k.GetLockedAsset(ctx, msg.Owner, msg.EvmChain)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("locked asset not found for owner %s on EVM chain %s", msg.Owner, msg.EvmChain)).Result()
+	}
+
+	// Transfer the locked asset back to the owner
+	err := k.bankKeeper.SendCoins(ctx, sdk.AccAddress{}, msg.Owner, sdk.Coins{lockedAsset.Amount})
+	if err != nil {
+		return err.Result()
+	}
+
+	// Remove the locked asset record
+	k.DeleteLockedAsset(ctx, lockedAsset)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgUpdatePrice handles the UpdatePrice message
+func HandleMsgUpdatePrice(ctx sdk.Context, k Keeper, msg MsgUpdatePrice) sdk.Result {
+	// Retrieve the locked asset information
+	lockedAsset, found := k.GetLockedAsset(ctx, msg.Owner, msg.EvmChain)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("locked asset not found for owner %s on EVM chain %s", msg.Owner, msg.EvmChain)).Result()
+	}
+
+	// Update the price of the locked asset
+	lockedAsset.Price = msg.Price
+	k.SetLockedAsset(ctx, lockedAsset)
+
+	return sdk.Result{Code: sdk.CodeOK}
+}
+
+// HandleMsgQueryLockedAsset handles the QueryLockedAsset message
+func HandleMsgQueryLockedAsset(ctx sdk.Context, k Keeper, owner sdk.AccAddress, evmChain string) sdk.Result {
+	// Retrieve the locked asset information
+	lockedAsset, found := k.GetLockedAsset(ctx, owner, evmChain)
+	if !found {
+		return sdk.ErrUnknownRequest(fmt.Sprintf("locked asset not found for owner %s on EVM chain %s", owner, evmChain)).Result()
+	}
+
+	// Marshal the locked asset information to JSON and return it
+	bz, err := ctx.Codec().MarshalJSON(lockedAsset)
+	if err != nil {
+		return sdk.ErrInternal(fmt.Sprintf("failed to marshal JSON: %s", err)).Result()
+	}
+
+	return sdk.Result{
+		Code: sdk.CodeOK,
+		Data: bz,
+	}
+}
+
+// HandleMsgQueryBalance handles the QueryBalance message
+func HandleMsgQueryBalance(ctx sdk.Context, k Keeper, owner sdk.AccAddress) sdk.Result {
+	// Retrieve the total balance of the owner on the Cosmos chain
+	balance := k.bankKeeper.GetCoins(ctx, owner)
+
+	// Marshal the balance information to JSON and return it
+	bz, err := ctx.Codec().MarshalJSON(balance)
+	if err != nil {
+		return sdk.ErrInternal(fmt.Sprintf("failed to marshal JSON: %s", err)).Result()
+	}
+
+	return sdk.Result{
+		Code: sdk.CodeOK,
+		Data: bz,
+	}
+}
